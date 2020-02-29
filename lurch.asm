@@ -33,6 +33,7 @@
     const CD_OFF    = 3;
     const CD_LEN    = 4;
     const MEM       = 5;
+    const MEM_BASE  = 6;
 }}
 
 
@@ -97,6 +98,12 @@ return($lurch, #lurch)
         jump($$)
         
 
+    @popIncrement:
+        ; Clean up the stack from a JUMPI
+        pop()
+
+        ; falls-through
+
     @increment:
         ; Increment the PC by 1
         mstore({{= slot(PC) }}, add(mload({{= slot(PC) }}), 1))
@@ -109,20 +116,28 @@ return($lurch, #lurch)
 
         ; [ PC ]
 
+        ; Check we are still inside our code space
+        ;$nextOk
+        ;mload({{= slot(BC_LEN) }})
+        ;dup2()
+        ;jumpi(lt($$, $$), $$)
+        ;jump({{= operations.offset + Opcode.from("STOP").value * 6 }});
+        ;@nextOk:
+
         ; Get the current operation
         shr(248, calldataload(add(mload({{= slot(BC_OFF) }}), $$)))
 
         ; [ opcode ]
 
-        ; Get the operation jump destination
-        add($operations, mul(6, $$))
-
-        ; [ jump_dest ]
-
-        jump($$)
+        ; Jump into the operation jump table
+        jump(add($operations, mul(6, $$)))
 
     @returnOp:
-       ;; TEMP -debug remove the range
+        ; [ ... length, srcMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        return($$, $$)
+
+        ;; TEMP -debug remove the range
         pop()
         pop()
 
@@ -137,6 +152,149 @@ return($lurch, #lurch)
         ; @TODO
         mstore({{= slot(PC) }}, 0xdeadbeef)
         return(0, 32)
+
+    ;;;;
+    ;;;; Anything after this can have 2-byte offsets
+    ;;;;
+
+    @sha3Op:
+        ; [ ... memDestOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        sha3($$, $$)
+        jump($increment)        
+
+    @calldataloadOp:
+        ; [ ... offset ]
+        add(mload({{= slot(CD_OFF) }}), $$)
+        calldataload($$)
+        jump($increment)
+
+    @calldatasizeOp:
+        ; [ ... ]
+        mload({{= slot(CD_LEN) }})
+        jump($increment)
+
+    @calldatacopyOp:
+        ; [ ... length, offset, dstMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        swap1()
+        add(mload({{= slot(CD_OFF) }}), $$)
+        swap1()
+        calldatacopy($$, $$, $$)
+        jump($increment)
+
+    @codesizeOp:
+        ; [ ... ]
+        mload({{= slot(BC_LEN) }})
+        jump($increment)
+
+    @codecopyOp:
+        ; [ ... length, offset, dstMemOffset]
+        add(mload({{= slot(MEM) }}), $$)
+        swap1()
+        add(mload({{= slot(BC_OFF) }}), $$)
+        swap1()
+        calldatacopy($$, $$, $$)
+        jump($increment)
+
+    @extcodecopyOp:
+        ; [ ... length, offset, dstMemOffset, address]
+        swap1()
+        add(mload({{= slot(MEM) }}), $$)
+        swap1()
+        extcodecopy($$, $$, $$, $$)
+        jump($increment)
+
+    
+    ; needs call to test...
+    ;@returndataOp:
+    ;    ; [ ... length, offset, dstMemOffset ]
+    ;    add(mload({{= slot(MEM) }}), $$)
+    ;    returndatacopy($$, $$, $$)
+    ;    jump($increment)
+
+    @mloadOp:
+        ; [ ... dstMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        mload($$)
+        jump($increment)        
+
+    @mstoreOp:
+        ; [ ... value, dstMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        mstore($$, $$)
+        jump($increment)        
+
+    @mstore8Op:
+        ; [ ... value, dstMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        mstore8($$, $$)
+        jump($increment)        
+
+    @jumpOp:
+        ; [ ... target ]
+
+        dup1()
+
+        ; [ ... target, target ]
+
+        ; Store the updated PC (we will die below if it is not a JUMPDEST)
+        mstore({{= slot(PC) }}, add(1, $$))
+
+        ; Get the opcode at target
+        shr(248, calldataload(add(mload({{= slot(BC_OFF) }}), $$)))
+
+        ; [ ... opcode ]
+
+        ; If it is a JUMPDEST, continue (skipping increment). Otherwise, die
+        jumpi($next, eq({{= Opcode.from("JUMPDEST").value }}, $$))
+        jump($invalidOp)
+
+    @jumpiOp:
+        ; [ ... notZero, target ]
+        swap1()
+        jumpi($popIncrement, isZero($$))
+        jump($jumpOp)
+
+    @pcOp:
+        ; [ ]
+        mload({{= slot(PC) }})
+        jump($increment)
+
+    @msizeOp:
+        ; [ ]
+        sub(msize, mload({{= slot(MEM_BASE) }}))
+        jump($increment)
+
+    @log0Op:
+        ; [ ... length, srcMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        log0($$, $$)
+        jump($increment)        
+
+    @log1Op:
+        ; [ ... topic0, length, srcMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        log1($$, $$, $$)
+        jump($increment)        
+
+    @log2Op:
+        ; [ ... topic1, topic0, length, srcMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        log2($$, $$, $$, $$)
+        jump($increment)        
+
+    @log3Op:
+        ; [ ... topic2, topic1, topic0, length, srcMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        log3($$, $$, $$, $$, $$)
+        jump($increment)        
+
+    @log4Op:
+        ; [ ... topic3, topic2, topic1, topic0, length, srcMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        log4($$, $$, $$, $$, $$, $$)
+        jump($increment)        
     
     @start:
         ; @TODO: Use various decoing depending on the selector
@@ -182,6 +340,10 @@ return($lurch, #lurch)
         ;  3      calldata_offset
         ;  4      calldata_length
 
+        mstore({{= slot(MEM); }}, {{= slot(MEM_BASE) }})
+
+        ;  5      memory_base => 6
+
         ; Start exeuting the VM
         jump($next)
 
@@ -194,8 +356,44 @@ return($lurch, #lurch)
 
     ; The stack must be intact (from the virtualized environment's point
     ; of view) when entering this jump table.
-
+    
     {{!
+
+        // Notes:
+        // - We pad with STOP (i.e. 0) because 0 is cheaper to deploy
+
+        // Simple Special cases
+        const special = {
+            SHA3: sha3Op,
+
+            MLOAD: mloadOp,
+            MSTORE: mstoreOp,
+            MSTORE8: mstore8Op,
+
+            LOG0: log0Op,
+            LOG1: log1Op,
+            LOG2: log2Op,
+            LOG3: log3Op,
+            LOG4: log4Op,
+
+            CALLDATALOAD: calldataloadOp,
+            CALLDATASIZE: calldatasizeOp,
+            CALLDATACOPY: calldatacopyOp,
+            CODESIZE: codesizeOp,
+            CODECOPY: codecopyOp,
+            EXTCODECOPY: extcodecopyOp,
+
+            JUMP: jumpOp,
+            JUMPI: jumpiOp,
+
+            PC: pcOp,
+            MSIZE: msizeOp,
+        };
+
+        for (const key in special) {
+            if (!special[key]) { throw new Error(`missing ${ key }`); }
+        }
+        
         const code = [ ];
         let lastLength = 2;
         for (let i = 0; i < 256; i++) {
@@ -204,11 +402,23 @@ return($lurch, #lurch)
             if (opcode == null) {
                 // Trap Invalid opcodes for possible reporting
                 code.push(Opcode.from("JUMPDEST"));               // 1 byte
-                code.push(Opcode.from("PUSH2"));                  // 1 byte
-                code.push(zeroPad(hexlify(invalidOp), 2));        // 2 bytes
-                code.push(Opcode.from("JUMP"));                   // 1 byte                
+                //code.push(Opcode.from("PUSH2"));                  // 1 byte
+                //code.push(zeroPad(hexlify(invalidOp), 2));        // 2 bytes
+                //code.push(Opcode.from("JUMP"));                   // 1 byte                
+                code.push(Opcode.from("STOP"));                   // 1 byte
+                code.push(Opcode.from("STOP"));                   // 1 byte
+                code.push(Opcode.from("STOP"));                   // 1 byte
+                code.push(Opcode.from("STOP"));                   // 1 byte
                 code.push(Opcode.from("STOP"));                   // 1 byte
             
+            } else if (opcode.mnemonic === "JUMPDEST") {
+                code.push(Opcode.from("JUMPDEST"));               // 1 byte
+                code.push(Opcode.from("PUSH1"));                  // 1 byte
+                code.push(zeroPad(hexlify(increment), 1));        // 1 byte
+                code.push(Opcode.from("JUMP"));                   // 1 byte
+                code.push(Opcode.from("STOP"));                   // 1 byte
+                code.push(Opcode.from("STOP"));                   // 1 byte
+
             } else if (opcode.isPush()) {
                 // PUSH opcodes include their push count on the stack
                 code.push(Opcode.from("JUMPDEST"));               // 1 byte
@@ -225,7 +435,15 @@ return($lurch, #lurch)
                 code.push(zeroPad(hexlify(returnOp), 2));         // 2 bytes
                 code.push(Opcode.from("JUMP"));                   // 1 byte
                 code.push(Opcode.from("STOP"));                   // 1 byte
-            
+
+            } else if (special[opcode.mnemonic]) {
+                // Return is hijacked for now for testing...
+                code.push(Opcode.from("JUMPDEST"));                        // 1 byte
+                code.push(Opcode.from("PUSH2"));                           // 1 byte
+                code.push(zeroPad(hexlify(special[opcode.mnemonic]), 2));  // 2 bytes
+                code.push(Opcode.from("JUMP"));                            // 1 byte
+                code.push(Opcode.from("STOP"));                            // 1 byte
+                
             } else {
                 // Most things just work with the stack
                 code.push(Opcode.from("JUMPDEST"));               // 1 byte
