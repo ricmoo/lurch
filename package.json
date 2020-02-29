@@ -1,0 +1,30 @@
+{
+  "name": "lurch",
+  "version": "0.0.1",
+  "description": "Ethereum VM para-virtualization (ish) written in EVM bytecode.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ricmoo/lurch.git"
+  },
+  "keywords": [
+    "ethereum",
+    "vm",
+    "eth",
+    "eval"
+  ],
+  "author": "Richard Moore <me@ricmoo.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ricmoo/lurch/issues"
+  },
+  "homepage": "https://github.com/ricmoo/lurch#readme",
+  "dependencies": {
+    "@ethersproject/asm": "^5.0.0-beta.151",
+    "@ethersproject/cli": "^5.0.0-beta.152",
+    "ethers": "^5.0.0-beta.175"
+  }
+}
