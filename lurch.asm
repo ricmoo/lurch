@@ -132,21 +132,6 @@ return($lurch, #lurch)
         ; Jump into the operation jump table
         jump(add($operations, mul(6, $$)))
 
-    @returnOp:
-        ; [ ... length, srcMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
-        return($$, $$)
-
-        ;; TEMP -debug remove the range
-        pop()
-        pop()
-
-        ;;; DEBUG
-        dup1()
-        mstore({{= slot(PC) }}, $$)
-        return(0, {{= 32 * 8 }})
-        ;;; /DEBUG
-
     @invalidOp:
 
         ; @TODO
@@ -207,11 +192,11 @@ return($lurch, #lurch)
 
     
     ; needs call to test...
-    ;@returndataOp:
-    ;    ; [ ... length, offset, dstMemOffset ]
-    ;    add(mload({{= slot(MEM) }}), $$)
-    ;    returndatacopy($$, $$, $$)
-    ;    jump($increment)
+    @returndatacopyOp:
+        ; [ ... length, offset, dstMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        returndatacopy($$, $$, $$)
+        jump($increment)
 
     @mloadOp:
         ; [ ... dstMemOffset ]
@@ -263,7 +248,7 @@ return($lurch, #lurch)
 
     @msizeOp:
         ; [ ]
-        sub(msize, mload({{= slot(MEM_BASE) }}))
+        sub(msize, {{= slot(MEM_BASE) }})
         jump($increment)
 
     @log0Op:
@@ -294,8 +279,111 @@ return($lurch, #lurch)
         ; [ ... topic3, topic2, topic1, topic0, length, srcMemOffset ]
         add(mload({{= slot(MEM) }}), $$)
         log4($$, $$, $$, $$, $$, $$)
-        jump($increment)        
+        jump($increment)
+
+    @createOp:
+        ; [ ... srcLength, srcOffset, value ]
+
+        swap1()
+        add(mload({{= slot(MEM) }}), $$)
+        swap1()
+
+        create($$, $$, $$)
+
+        jump($increment)
+
+    @callOp:
+        ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, value, address, gasLimit ]
+
+        swap3()
+        add(mload({{= slot(MEM) }}), $$)
+        swap3()
+
+        swap5()
+        add(mload({{= slot(MEM) }}), $$)
+        swap5()
+
+        call($$, $$, $$, $$, $$, $$, $$)
+
+        jump($increment)
+
+    @callcodeOp:
+        ; @TODO: Is this correct? No good docs on CALLCODE...
+        ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, value, address, gasLimit ]
+
+        swap3()
+        add(mload({{= slot(MEM) }}), $$)
+        swap3()
+
+        swap5()
+        add(mload({{= slot(MEM) }}), $$)
+        swap5()
+
+        callcode($$, $$, $$, $$, $$, $$, $$)
+
+        jump($increment)
+
+    @returnOp:
+        ; [ ... length, srcMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        return($$, $$)
+
+        ;; TEMP -debug remove the range
+        ;pop()
+        ;pop()
+
+        ;;; DEBUG
+        ;dup1()
+        ;mstore({{= slot(PC) }}, $$)
+        ;return(0, {{= 32 * 8 }})
+        ;;; /DEBUG
+
+    @delegatecallOp:
+        ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, address, gasLimit ]
+
+        swap2()
+        add(mload({{= slot(MEM) }}), $$)
+        swap2()
+
+        swap4()
+        add(mload({{= slot(MEM) }}), $$)
+        swap4()
+
+        delegatecall($$, $$, $$, $$, $$, $$)
+
+        jump($increment)
+
+    @create2Op:
+        ; [ ... salt, srcLength, srcOffset, value ]
+
+        swap1()
+        add(mload({{= slot(MEM) }}), $$)
+        swap1()
+
+        create2($$, $$, $$, $$)
+
+        jump($increment)
+
+    @staticcallOp:
+        ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, address, gasLimit ]
+
+        swap2()
+        add(mload({{= slot(MEM) }}), $$)
+        swap2()
+
+        swap4()
+        add(mload({{= slot(MEM) }}), $$)
+        swap4()
+
+        staticcall($$, $$, $$, $$, $$, $$)
+
+        jump($increment)
     
+    @revertOp:
+        ; [ ... length, srcMemOffset ]
+        add(mload({{= slot(MEM) }}), $$)
+        revert($$, $$)
+
     @start:
         ; @TODO: Use various decoing depending on the selector
         ; - eval(bytes bytecode)
@@ -382,16 +470,29 @@ return($lurch, #lurch)
             CODESIZE: codesizeOp,
             CODECOPY: codecopyOp,
             EXTCODECOPY: extcodecopyOp,
+            RETURNDATACOPY: returndatacopyOp,
 
             JUMP: jumpOp,
             JUMPI: jumpiOp,
 
             PC: pcOp,
             MSIZE: msizeOp,
+
+            CREATE: createOp,
+            CALL: callOp,
+            CALLCODE: callcodeOp,
+            RETURN: returnOp,
+            DELEGATECALL: delegatecallOp,
+            CREATE2: create2Op,
+            STATICCALL: staticcallOp,
+            REVERT: revertOp,
         };
 
-        for (const key in special) {
-            if (!special[key]) { throw new Error(`missing ${ key }`); }
+        for (const mnemonic in special) {
+            if (!special[mnemonic]) { throw new Error(`missing jumpdest: ${ mnemonic }`); }
+            if (Opcode.from(mnemonic) == null) {
+                throw new Error(`unknown opcode: ${ mnemonic }`);
+            }
         }
         
         const code = [ ];
@@ -412,6 +513,7 @@ return($lurch, #lurch)
                 code.push(Opcode.from("STOP"));                   // 1 byte
             
             } else if (opcode.mnemonic === "JUMPDEST") {
+                // Jump dests can be optimized
                 code.push(Opcode.from("JUMPDEST"));               // 1 byte
                 code.push(Opcode.from("PUSH1"));                  // 1 byte
                 code.push(zeroPad(hexlify(increment), 1));        // 1 byte
@@ -427,14 +529,6 @@ return($lurch, #lurch)
                 code.push(Opcode.from("PUSH1"));                  // 1 byte
                 code.push(zeroPad(hexlify(pushOp), 1));           // 1 byte
                 code.push(Opcode.from("JUMP"));                   // 1 byte                
-
-            } else if (opcode.mnemonic === "RETURN") {
-                // Return is hijacked for now for testing...
-                code.push(Opcode.from("JUMPDEST"));               // 1 byte
-                code.push(Opcode.from("PUSH2"));                  // 1 byte
-                code.push(zeroPad(hexlify(returnOp), 2));         // 2 bytes
-                code.push(Opcode.from("JUMP"));                   // 1 byte
-                code.push(Opcode.from("STOP"));                   // 1 byte
 
             } else if (special[opcode.mnemonic]) {
                 // Return is hijacked for now for testing...
@@ -454,6 +548,7 @@ return($lurch, #lurch)
                 code.push(Opcode.from("STOP"));                   // 1 byte
             }
 
+            // Make sure the opcode sequence is exactly 6 bytes
             if (concat(code).length !== lastLength + 12) {
                 console.log(concat(code).length, lastLength, code);
                 throw new Error("wrong bytecode length for jump table: " + i);

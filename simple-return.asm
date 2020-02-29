@@ -2,7 +2,7 @@
 ;log1(0, 32, codesize());
 ;return(0, 32)
 
-codecopy(0, 0, #contract)
+codecopy(0, $contract, #contract)
 return(0, #contract)
 
 @contract{
