@@ -25,6 +25,7 @@
   "dependencies": {
     "@ethersproject/asm": "^5.0.0-beta.151",
     "@ethersproject/cli": "^5.0.0-beta.152",
-    "ethers": "^5.0.0-beta.175"
+    "ethers": "^5.0.0-beta.175",
+    "solc": "^0.6.3"
   }
 }

@@ -49,6 +49,8 @@ async function deploy() {
     const receipt = await tx.wait();
     //console.log("Deploy Receipt", receipt);
 
+    console.log("Deployment Gas Used:", receipt.gasUsed.toString());
+
     return receipt.contractAddress;
 
 }

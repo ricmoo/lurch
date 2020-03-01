@@ -116,27 +116,26 @@ return($lurch, #lurch)
 
         ; [ PC ]
 
-        ; Check we are still inside our code space
-        ;$nextOk
-        ;mload({{= slot(BC_LEN) }})
-        ;dup2()
-        ;jumpi(lt($$, $$), $$)
-        ;jump({{= operations.offset + Opcode.from("STOP").value * 6 }});
-        ;@nextOk:
+        ; Bounds checking; compute a multiplier (0 if out-of-bounds, 1 otherwise)
+        lt(dup2(), mload({{= slot(BC_LEN) }}))
+        swap1()
+
+        ; [ ((PC < BC_LEN) ? 1: 0), PC ]
 
         ; Get the current operation
         shr(248, calldataload(add(mload({{= slot(BC_OFF) }}), $$)))
 
-        ; [ opcode ]
+        ; Use the bounds checking multiplier from above
+        mul($$, $$)
+
+        ; [ ((PC < BC_LEN) ? opcode: STOP) ]
 
         ; Jump into the operation jump table
         jump(add($operations, mul(6, $$)))
 
     @invalidOp:
-
-        ; @TODO
-        mstore({{= slot(PC) }}, 0xdeadbeef)
-        return(0, 32)
+        ; @TODO: when redoing the jump table, this can be embedded?
+        invalid();
 
     ;;;;
     ;;;; Anything after this can have 2-byte offsets
@@ -488,6 +487,7 @@ return($lurch, #lurch)
             REVERT: revertOp,
         };
 
+        // Some sanity checking on our jump table
         for (const mnemonic in special) {
             if (!special[mnemonic]) { throw new Error(`missing jumpdest: ${ mnemonic }`); }
             if (Opcode.from(mnemonic) == null) {
