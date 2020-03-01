@@ -29,6 +29,7 @@ async function getBytecode(filename, target) {
 
 async function deployLurch() {
     const lurchBytecode = await getBytecode("./lurch.asm");
+    //console.log("DEPLOY", lurchBytecode);
     //const lurchRuntimeBytecode = await getBytecode("./lurch.asm", "lurch");
     //console.log(formatBytecode(disassemble(lurchRuntimeBytecode)));
     //console.log("Lurch Size:", ethers.utils.hexDataLength(lurchRuntimeBytecode));
