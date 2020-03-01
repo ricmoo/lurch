@@ -4,7 +4,8 @@ const fs = require("fs");
 
 const { ethers } = require("ethers");
 //const { assemble, parse } = require("@ethersproject/asm");
-const { assemble, disassemble, formatBytecode, parse } = require("/Users/ricmoo/Development/ethers/ethers.js-v5/packages/asm");
+const { assemble, disassemble, formatBytecode, parse } = 
+require("/Users/ricmoo/Development/ethers/ethers.js-v5/packages/asm");
 //const { assemble, disassemble, formatBytecode, parse } = require("@ethersproject/asm");
 
 const provider = new ethers.providers.JsonRpcProvider();

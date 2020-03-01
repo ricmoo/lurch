@@ -4,6 +4,7 @@
   "description": "Ethereum VM para-virtualization (ish) written in EVM bytecode.",
   "main": "index.js",
   "scripts": {
+    "demo": "node test-erc20.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

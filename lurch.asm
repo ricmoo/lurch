@@ -97,7 +97,6 @@ return($lurch, #lurch)
         swap1()
         jump($$)
         
-
     @popIncrement:
         ; Clean up the stack from a JUMPI
         pop()
