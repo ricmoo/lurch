@@ -13,7 +13,7 @@
 ;  0     PC
 ;  1     Bytecode Offset (into calldata)
 ;  2     Bytecode Length
-;  3     Calldata Offset (into calldata)
+;  3     (calldata offset << 64) | (calldata_length)
 ;  4     Calldata Length
 ;  5     Virtualized Memory Offset
 ;
@@ -21,19 +21,16 @@
 ;
 
 {{!
+    const SLOT_PC        = 0x00;
+    const SLOT_BC_OFF    = 0x20;
+    const SLOT_BC_LEN    = 0x40;
 
-    function slot(index) {
-        if (index == null) { throw new Error("invalid slot"); }
-        return 32 * index;
-    }
+    const SLOT_CD        = 0x60;
+    const CD_OFF_SHIFT   = 64;
+    const CD_LEN_MASK    = 0xffff;
 
-    const PC        = 0;
-    const BC_OFF    = 1;
-    const BC_LEN    = 2;
-    const CD_OFF    = 3;
-    const CD_LEN    = 4;
-    const MEM       = 5;
-    const MEM_BASE  = 6;
+    const SLOT_MEM       = 0x80;
+    const SLOT_MEM_BASE  = 0xa0;
 }}
 
 
@@ -64,7 +61,7 @@ return($lurch, #lurch)
 
         ; [ pushXX, 256 - pushXX * 8 ]
 
-        calldataload(add(0x01, add(mload({{= slot(PC) }}), mload({{= slot(BC_OFF) }}))))
+        calldataload(add(0x01, add(mload({{= SLOT_PC }}), mload({{= SLOT_BC_OFF }}))))
         swap1()
 
         ; [ pushXX, push_literal[0..32], pushXX ]
@@ -76,7 +73,7 @@ return($lurch, #lurch)
         ; [ push_literal[0..32], pushXX ]
 
         ; Update the PC to skip past this entire PUSH operation
-        mstore({{= slot(PC) }}, add(0x01, add(mload({{= slot(PC) }}), $$)))
+        mstore({{= SLOT_PC }}, add(0x01, add(mload({{= SLOT_PC }}), $$)))
 
         ; [ push_literal[0..32] ]
 
@@ -105,24 +102,24 @@ return($lurch, #lurch)
 
     @increment:
         ; Increment the PC by 1
-        mstore({{= slot(PC) }}, add(mload({{= slot(PC) }}), 1))
+        mstore({{= SLOT_PC }}, add(mload({{= SLOT_PC }}), 1))
 
         ; falls-through
 
     @next:
         ; Get the current PC
-        mload({{= slot(PC) }})
+        mload({{= SLOT_PC }})
 
         ; [ PC ]
 
         ; Bounds checking; compute a multiplier (0 if out-of-bounds, 1 otherwise)
-        lt(dup2(), mload({{= slot(BC_LEN) }}))
+        lt(dup2(), mload({{= SLOT_BC_LEN }}))
         swap1()
 
         ; [ ((PC < BC_LEN) ? 1: 0), PC ]
 
         ; Get the current operation
-        shr(248, calldataload(add(mload({{= slot(BC_OFF) }}), $$)))
+        shr(248, calldataload(add(mload({{= SLOT_BC_OFF }}), $$)))
 
         ; Use the bounds checking multiplier from above
         mul($$, $$)
@@ -142,40 +139,40 @@ return($lurch, #lurch)
 
     @sha3Op:
         ; [ ... memDestOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         sha3($$, $$)
         jump($increment)        
 
     @calldataloadOp:
         ; [ ... offset ]
-        add(mload({{= slot(CD_OFF) }}), $$)
+        add(shr({{= CD_OFF_SHIFT }}, mload({{= SLOT_CD }})), $$)
         calldataload($$)
         jump($increment)
 
     @calldatasizeOp:
         ; [ ... ]
-        mload({{= slot(CD_LEN) }})
+        mload(and({{= CD_LEN_MASK }}, {{= SLOT_CD }}))
         jump($increment)
 
     @calldatacopyOp:
         ; [ ... length, offset, dstMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap1()
-        add(mload({{= slot(CD_OFF) }}), $$)
+        add(mload(shr({{= CD_OFF_SHIFT}}, {{= SLOT_CD }})), $$)
         swap1()
         calldatacopy($$, $$, $$)
         jump($increment)
 
     @codesizeOp:
         ; [ ... ]
-        mload({{= slot(BC_LEN) }})
+        mload({{= SLOT_BC_LEN }})
         jump($increment)
 
     @codecopyOp:
         ; [ ... length, offset, dstMemOffset]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap1()
-        add(mload({{= slot(BC_OFF) }}), $$)
+        add(mload({{= SLOT_BC_OFF }}), $$)
         swap1()
         calldatacopy($$, $$, $$)
         jump($increment)
@@ -183,7 +180,7 @@ return($lurch, #lurch)
     @extcodecopyOp:
         ; [ ... length, offset, dstMemOffset, address]
         swap1()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap1()
         extcodecopy($$, $$, $$, $$)
         jump($increment)
@@ -192,25 +189,25 @@ return($lurch, #lurch)
     ; needs call to test...
     @returndatacopyOp:
         ; [ ... length, offset, dstMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         returndatacopy($$, $$, $$)
         jump($increment)
 
     @mloadOp:
         ; [ ... dstMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         mload($$)
         jump($increment)        
 
     @mstoreOp:
         ; [ ... value, dstMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         mstore($$, $$)
         jump($increment)        
 
     @mstore8Op:
         ; [ ... value, dstMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         mstore8($$, $$)
         jump($increment)        
 
@@ -222,10 +219,10 @@ return($lurch, #lurch)
         ; [ ... target, target ]
 
         ; Store the updated PC (we will die below if it is not a JUMPDEST)
-        mstore({{= slot(PC) }}, add(1, $$))
+        mstore({{= SLOT_PC }}, add(1, $$))
 
         ; Get the opcode at target
-        shr(248, calldataload(add(mload({{= slot(BC_OFF) }}), $$)))
+        shr(248, calldataload(add(mload({{= SLOT_BC_OFF }}), $$)))
 
         ; [ ... opcode ]
 
@@ -241,41 +238,41 @@ return($lurch, #lurch)
 
     @pcOp:
         ; [ ]
-        mload({{= slot(PC) }})
+        mload({{= SLOT_PC }})
         jump($increment)
 
     @msizeOp:
         ; [ ]
-        sub(msize, {{= slot(MEM_BASE) }})
+        sub(msize, {{= SLOT_MEM_BASE }})
         jump($increment)
 
     @log0Op:
         ; [ ... length, srcMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         log0($$, $$)
         jump($increment)        
 
     @log1Op:
         ; [ ... topic0, length, srcMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         log1($$, $$, $$)
         jump($increment)        
 
     @log2Op:
         ; [ ... topic1, topic0, length, srcMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         log2($$, $$, $$, $$)
         jump($increment)        
 
     @log3Op:
         ; [ ... topic2, topic1, topic0, length, srcMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         log3($$, $$, $$, $$, $$)
         jump($increment)        
 
     @log4Op:
         ; [ ... topic3, topic2, topic1, topic0, length, srcMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         log4($$, $$, $$, $$, $$, $$)
         jump($increment)
 
@@ -283,7 +280,7 @@ return($lurch, #lurch)
         ; [ ... srcLength, srcOffset, value ]
 
         swap1()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap1()
 
         create($$, $$, $$)
@@ -294,11 +291,11 @@ return($lurch, #lurch)
         ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, value, address, gasLimit ]
 
         swap3()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap3()
 
         swap5()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap5()
 
         call($$, $$, $$, $$, $$, $$, $$)
@@ -310,11 +307,11 @@ return($lurch, #lurch)
         ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, value, address, gasLimit ]
 
         swap3()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap3()
 
         swap5()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap5()
 
         callcode($$, $$, $$, $$, $$, $$, $$)
@@ -323,7 +320,7 @@ return($lurch, #lurch)
 
     @returnOp:
         ; [ ... length, srcMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         return($$, $$)
 
         ;; TEMP -debug remove the range
@@ -332,7 +329,7 @@ return($lurch, #lurch)
 
         ;;; DEBUG
         ;dup1()
-        ;mstore({{= slot(PC) }}, $$)
+        ;mstore({{= SLOT_PC }}, $$)
         ;return(0, {{= 32 * 8 }})
         ;;; /DEBUG
 
@@ -340,11 +337,11 @@ return($lurch, #lurch)
         ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, address, gasLimit ]
 
         swap2()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap2()
 
         swap4()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap4()
 
         delegatecall($$, $$, $$, $$, $$, $$)
@@ -355,7 +352,7 @@ return($lurch, #lurch)
         ; [ ... salt, srcLength, srcOffset, value ]
 
         swap1()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap1()
 
         create2($$, $$, $$, $$)
@@ -366,11 +363,11 @@ return($lurch, #lurch)
         ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, address, gasLimit ]
 
         swap2()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap2()
 
         swap4()
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         swap4()
 
         staticcall($$, $$, $$, $$, $$, $$)
@@ -379,7 +376,7 @@ return($lurch, #lurch)
     
     @revertOp:
         ; [ ... length, srcMemOffset ]
-        add(mload({{= slot(MEM) }}), $$)
+        add(mload({{= SLOT_MEM }}), $$)
         revert($$, $$)
 
     @start:
@@ -405,9 +402,9 @@ return($lurch, #lurch)
         calldataload($$)                                 ; [ 0x04, 0x04, bytecode_offset ]
         add($$, $$)                                      ; [ 0x04, bytecode_length ]
         dup1()                                           ; [ 0x04, bytecode_length, bytecode_length ]
-        mstore({{= slot(BC_LEN) }}, calldataload($$))    ; [ 0x04, bytecode_length ]
+        mstore({{= SLOT_BC_LEN }}, calldataload($$))    ; [ 0x04, bytecode_length ]
         add(32, $$)                                      ; [ 0x04, bytecode_data ]
-        mstore({{= slot(BC_OFF) }}, $$)                  ; [ 0x04 ]
+        mstore({{= SLOT_BC_OFF }}, $$)                  ; [ 0x04 ]
 
         ; Memory
         ; Slot   Value
@@ -415,18 +412,19 @@ return($lurch, #lurch)
         ;  2      bytecode_length
 
         ; Load the calldata size and offset
-        0x24                                             ; [ 0x04, 0x24 ]
-        calldataload($$)                                 ; [ 0x04, calldata_offset ]
-        add($$, $$)                                      ; [ calldata_length ]
-        dup1()                                           ; [ calldata_length, calldata_length ]
-        mstore({{= slot(CD_LEN) }}, calldataload($$))    ; [ calldata_length ]
-        add(32, $$)                                      ; [ calldata_data ]
-        mstore({{= slot(CD_OFF) }}, $$)                  ; [ ]
+        calldataload(0x24)                               ; [ 0x04, calldata_link ]
+        add($$, $$)                                      ; [ calldata ]
+        dup1()                                           ; [ calldata, calldata ]
+        calldataload($$)                                 ; [ calldata, calldata.length ]
+        swap1()                                          ; [ calldata.length, calldata ]
+        add(32, $$)                                      ; [ calldata.length, calldata.data ]
+        or(shl({{= CD_OFF_SHIFT }}, $$), $$)             ; [ (calldata.length | (calldata.data << CD_OFF_SHIFT)) ]
+        mstore({{= SLOT_CD }}, $$)                       ; [ ]
 
         ;  3      calldata_offset
         ;  4      calldata_length
 
-        mstore({{= slot(MEM); }}, {{= slot(MEM_BASE) }})
+        mstore({{= SLOT_MEM }}, {{= SLOT_MEM_BASE }})
 
         ;  5      memory_base => 6
 
