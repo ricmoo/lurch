@@ -1,6 +1,8 @@
 ; Lurch VM
 ;
 
+; todo: store PC wrt BC
+
 ; Result
 ; 0 - error
 ; 1 - return
@@ -9,13 +11,13 @@
 ; 4 - invalid
 
 ; Memory Layout
-; Slot    
-;  0     PC
-;  1     Bytecode Offset (into calldata)
-;  2     Bytecode Length
-;  3     (calldata offset << 64) | (calldata_length)
-;  4     Calldata Length
-;  5     Virtualized Memory Offset
+; Slot   Purpose
+;  0      PC
+;  1      Bytecode Offset (into calldata)
+;  2      Bytecode Length
+;  3      (calldata offset << 80) | (scratch << 64) | (calldata_length)
+;  4      Calldata Length
+;  5      Virtualized Memory Offset
 ;
 ;
 ;
@@ -26,8 +28,9 @@
     const SLOT_BC_LEN    = 0x40;
 
     const SLOT_CD        = 0x60;
-    const CD_OFF_SHIFT   = 64;
+    const CD_OFF_SHIFT   = 80;
     const CD_LEN_MASK    = 0xffff;
+    const SLOT_SCRATCH   = SLOT_CD + 0x20 - 2 - 2;
 
     const SLOT_MEM       = 0x80;
     const SLOT_MEM_BASE  = 0xa0;
@@ -50,35 +53,6 @@ return($lurch, #lurch)
     ; jumpdest offset, reserving these low ones for frequently used things)
     jump($start)
 
-    ; Execute a push operation
-    ; - Caller must push the count pushXX of bytes to push
-    ; - Return places the value on the stack
-    @pushOp:
-        ; [ pushXX ]
-
-        dup1()
-        sub(256, shl(3, $$))
-
-        ; [ pushXX, 256 - pushXX * 8 ]
-
-        calldataload(add(0x01, add(mload({{= SLOT_PC }}), mload({{= SLOT_BC_OFF }}))))
-        swap1()
-
-        ; [ pushXX, push_literal[0..32], pushXX ]
-
-        ; Trim off any extra bytes on the right
-        shr($$, $$)
-        swap1()
-
-        ; [ push_literal[0..32], pushXX ]
-
-        ; Update the PC to skip past this entire PUSH operation
-        mstore({{= SLOT_PC }}, add(0x01, add(mload({{= SLOT_PC }}), $$)))
-
-        ; [ push_literal[0..32] ]
-
-        jump($next)
-
     ; Places a 1 on the stack if this MUST be static, 0 otherwise
     ; Caller must place the return jumpdest on the stack before
     @isStatic:
@@ -93,8 +67,10 @@ return($lurch, #lurch)
         ; Return from this sub-routine
         swap1()
         jump($$)
-        
+
     @popIncrement:
+        ; [ ... target ]
+
         ; Clean up the stack from a JUMPI
         pop()
 
@@ -107,16 +83,19 @@ return($lurch, #lurch)
         ; falls-through
 
     @next:
+        ; The length below for the codecopy to fetch the jumpdest
+        0x02
+
         ; Get the current PC
         mload({{= SLOT_PC }})
 
-        ; [ PC ]
+        ; [ 0x02, PC ]
 
         ; Bounds checking; compute a multiplier (0 if out-of-bounds, 1 otherwise)
         lt(dup2(), mload({{= SLOT_BC_LEN }}))
         swap1()
 
-        ; [ ((PC < BC_LEN) ? 1: 0), PC ]
+        ; [ 0x02, ((PC < BC_LEN) ? 1: 0), PC ]
 
         ; Get the current operation
         shr(248, calldataload(add(mload({{= SLOT_BC_OFF }}), $$)))
@@ -124,37 +103,187 @@ return($lurch, #lurch)
         ; Use the bounds checking multiplier from above
         mul($$, $$)
 
-        ; [ ((PC < BC_LEN) ? opcode: STOP) ]
+        ; [ 0x02, ((PC < BC_LEN) ? opcode: STOP) ]
+
+        ; Copy the jumpdest location in code from the jump table
+        add($operations, shl(1, $$))
+
+        ; [ 0x02, (((jump_table[opcode]) << 240) | junk) ]
+
+        ; Load the jumpdest into scratch and trim off all the junk
+        codecopy({{= SLOT_SCRATCH }}, $$, $$)
+        shr(240, mload({{= SLOT_SCRATCH }}))
 
         ; Jump into the operation jump table
-        jump(add($operations, mul(6, $$)))
+        jump($$)
 
-    @invalidOp:
-        ; @TODO: when redoing the jump table, this can be embedded?
-        invalid();
 
-    ;;;;
-    ;;;; Anything after this can have 2-byte offsets
-    ;;;;
+    {{!
+        const jumpTable = [ ];
+        const added = { };
+        for (let i = 0; i < 256; i++) {
+            jumpTable[i] = opInvalid;
+        }
 
-    @sha3Op:
+        function setJumpTable(offset, opcode) {
+            //console.log(`Adding ${ Opcode.from(opcode).mnemonic } to ${ offset }.`);
+            const index = offset * 2;
+            if (added[opcode]) { throw new Error("Jump Table already has that value: " + opcode); }
+            added[opcode] = true;
+            jumpTable[opcode] = offset;
+        }
+
+        function length(ops) {
+            return arrayify(ops).length;
+        }
+
+
+        function getSimpleOp(offset, opcode) {
+            setJumpTable(offset, opcode);
+            const ops = [ ];
+            ops.push(Opcode.from("JUMPDEST"))
+            ops.push(opcode)
+            ops.push(Opcode.from("PUSH1"))
+            ops.push(increment)
+            ops.push(Opcode.from("JUMP"))
+            return concat(ops);
+        }
+
+        // [ ... ]
+        function getSimpleOpRange(offset, start, end) {
+            const ops = [ ]
+            for (let i = start; i <= end; i++) {
+                ops.push(getSimpleOp(offset + length(concat(ops)), i));
+            }
+            return concat(ops);
+        }
+
+        // [ ... topicN, ... , topic0, length, srcMemOffset ]
+        function getLogOp(offset, opcode) {
+            setJumpTable(offset, opcode);
+
+            const ops = [ ];
+            ops.push(Opcode.from("JUMPDEST"))
+
+            // add(mload SLOT_MEM), $$)
+            ops.push(Opcode.from("PUSH1"))
+            ops.push(SLOT_MEM);
+            ops.push(Opcode.from("MLOAD"));
+            ops.push(Opcode.from("ADD"));
+
+            // logN( ... )
+            ops.push(opcode)
+
+            // jump(increment)
+            ops.push(Opcode.from("PUSH1"))
+            ops.push(increment)
+            ops.push(Opcode.from("JUMP"))
+
+            return concat(ops);
+        }
+
+        function getPushOps(offset) {
+            const ops = [ ];
+            for (let i = 1; i <= 32; i++) {
+                setJumpTable(offset + ops.length, 0x60 + i - 1);
+                ops.push(Opcode.from("JUMPDEST"))
+
+                // Load the PC
+                ops.push(Opcode.from("PUSH1"));
+                ops.push(SLOT_PC);
+                ops.push(Opcode.from("MLOAD"));
+
+                // [ PC ]
+
+                // Add the entire push operation to the PC (1 + i)
+                ops.push(Opcode.from("DUP1"));             // [ PC, PC ]
+                ops.push(Opcode.from("PUSH1"));
+                ops.push(i + 1);                           // [ PC, PC, (i + 1) ]
+                ops.push(Opcode.from("ADD"));              // [ PC, (PC + i + 1) ]
+                ops.push(Opcode.from("PUSH1"));
+                ops.push(SLOT_PC);                         // [ PC, (PC + i + 1), SLOT_PC ]
+                ops.push(Opcode.from("MSTORE"));           // [ PC ]
+
+                // [ PC ]
+
+                // Load the value from calldata (aligned to the left)
+                ops.push(Opcode.from("PUSH1"));
+                ops.push(1);                                // [ PC, 1 ]
+                ops.push(Opcode.from("ADD"));               // [ PC + 1 ]
+                ops.push(Opcode.from("PUSH1"));
+                ops.push(SLOT_BC_OFF);
+                ops.push(Opcode.from("MLOAD"));             // [ PC + 1, BC.offset ]
+                ops.push(Opcode.from("ADD"));               // [ PC + 1 + BC.offset ]
+                ops.push(Opcode.from("CALLDATALOAD"));      // [ (value[0:i] + junk[i:32]) ]
+
+                // Shift off the bottom junk (this is a nop for PUSH32)
+                if (i !== 32) {
+                    ops.push(Opcode.from("PUSH1"));
+                    ops.push(256 - 8 * i);
+                    ops.push(Opcode.from("SHR"));
+                }
+
+                // Jump back in
+                ops.push(Opcode.from("PUSH1"))
+                ops.push(next);
+                ops.push(Opcode.from("JUMP"))
+            }
+            return concat(ops);
+        }
+    }}
+
+    {{! setJumpTable(opStop, Opcode.from("STOP").value) }}
+    @opStop:
+        stop
+
+
+    ;;;;;;;;;;;;;;;
+    ;; Math Operations
+
+    @opsMaths[ {{= getSimpleOpRange(opsMaths.offset, 0x01, 0x0b) }} ]
+
+
+    ;;;;;;;;;;;;;;;
+    ;; Compare and Bitwise Operations
+
+    @opsCompareBitwise[ {{= getSimpleOpRange(opsCompareBitwise.offset, 0x10, 0x1d) }} ]
+
+
+    ;;;;;;;;;;;;;;;
+    ;; Identity Operations
+
+    {{! setJumpTable(opSha3, Opcode.from("SHA3").value) }}
+    @opSha3:
         ; [ ... memDestOffset ]
         add(mload({{= SLOT_MEM }}), $$)
         sha3($$, $$)
-        jump($increment)        
+        jump($increment)
 
-    @calldataloadOp:
+
+    ;;;;;;;;;;;;;;;
+    ;; Environment Information
+
+    @opAddress[ {{= getSimpleOp(opAddress.offset, Opcode.from("ADDRESS").value) }} ]
+    @opBalance[ {{= getSimpleOp(opBalance.offset, Opcode.from("BALANCE").value) }} ]
+    @opOrigin[ {{= getSimpleOp(opOrigin.offset, Opcode.from("ORIGIN").value) }} ]
+    @opCaller[ {{= getSimpleOp(opCaller.offset, Opcode.from("CALLER").value) }} ]
+    @opCallvalue[ {{= getSimpleOp(opCallvalue.offset, Opcode.from("CALLVALUE").value) }} ]
+
+    {{! setJumpTable(opCalldataload, Opcode.from("CALLDATALOAD").value) }}
+    @opCalldataload:
         ; [ ... offset ]
         add(shr({{= CD_OFF_SHIFT }}, mload({{= SLOT_CD }})), $$)
         calldataload($$)
         jump($increment)
 
-    @calldatasizeOp:
+    {{! setJumpTable(opCalldatasize, Opcode.from("CALLDATASIZE").value) }}
+    @opCalldatasize:
         ; [ ... ]
         mload(and({{= CD_LEN_MASK }}, {{= SLOT_CD }}))
         jump($increment)
 
-    @calldatacopyOp:
+    {{! setJumpTable(opCalldatacopy, Opcode.from("CALLDATACOPY").value) }}
+    @opCalldatacopy:
         ; [ ... length, offset, dstMemOffset ]
         add(mload({{= SLOT_MEM }}), $$)
         swap1()
@@ -163,12 +292,14 @@ return($lurch, #lurch)
         calldatacopy($$, $$, $$)
         jump($increment)
 
-    @codesizeOp:
+    {{! setJumpTable(opCodesize, Opcode.from("CODESIZE").value) }}
+    @opCodesize:
         ; [ ... ]
         mload({{= SLOT_BC_LEN }})
         jump($increment)
 
-    @codecopyOp:
+    {{! setJumpTable(opCodecopy, Opcode.from("CODECOPY").value) }}
+    @opCodecopy:
         ; [ ... length, offset, dstMemOffset]
         add(mload({{= SLOT_MEM }}), $$)
         swap1()
@@ -177,7 +308,11 @@ return($lurch, #lurch)
         calldatacopy($$, $$, $$)
         jump($increment)
 
-    @extcodecopyOp:
+    @opGasprice[ {{= getSimpleOp(opGasprice.offset, Opcode.from("GASPRICE").value) }} ]
+    @opExtcodesize[ {{= getSimpleOp(opExtcodesize.offset, Opcode.from("EXTCODESIZE").value) }} ]
+
+    {{! setJumpTable(opExtcodecopy, Opcode.from("EXTCODECOPY").value) }}
+    @opExtcodecopy:
         ; [ ... length, offset, dstMemOffset, address]
         swap1()
         add(mload({{= SLOT_MEM }}), $$)
@@ -185,33 +320,56 @@ return($lurch, #lurch)
         extcodecopy($$, $$, $$, $$)
         jump($increment)
 
-    
+    @opReturndatasize[ {{= getSimpleOp(opReturndatasize.offset, Opcode.from("RETURNDATASIZE").value) }} ]
+
     ; needs call to test...
-    @returndatacopyOp:
+    {{! setJumpTable(opReturndatacopy, Opcode.from("RETURNDATACOPY").value) }}
+    @opReturndatacopy:
         ; [ ... length, offset, dstMemOffset ]
         add(mload({{= SLOT_MEM }}), $$)
         returndatacopy($$, $$, $$)
         jump($increment)
 
-    @mloadOp:
+    @opExtcodehash[ {{= getSimpleOp(opExtcodehash.offset, Opcode.from("EXTCODEHASH").value) }} ]
+
+
+    ;;;;;;;;;;;;;;;
+    ;; Block Information
+
+    @opsBlock[ {{= getSimpleOpRange(opsBlock.offset, 0x40, 0x45) }} ]
+
+
+    ;;;;;;;;;;;;;;;
+    ;; Stack, Memory, Storage and Flow Operations
+
+    @opPop[ {{= getSimpleOp(opPop.offset, Opcode.from("POP").value) }} ]
+
+    {{! setJumpTable(opMload, Opcode.from("MLOAD").value) }}
+    @opMload:
         ; [ ... dstMemOffset ]
         add(mload({{= SLOT_MEM }}), $$)
         mload($$)
-        jump($increment)        
+        jump($increment)
 
-    @mstoreOp:
+    {{! setJumpTable(opMstore, Opcode.from("MSTORE").value) }}
+    @opMstore:
         ; [ ... value, dstMemOffset ]
         add(mload({{= SLOT_MEM }}), $$)
         mstore($$, $$)
-        jump($increment)        
+        jump($increment)
 
-    @mstore8Op:
+    {{! setJumpTable(opMstore8, Opcode.from("MSTORE8").value) }}
+    @opMstore8:
         ; [ ... value, dstMemOffset ]
         add(mload({{= SLOT_MEM }}), $$)
         mstore8($$, $$)
-        jump($increment)        
+        jump($increment)
 
-    @jumpOp:
+    @opSload[ {{= getSimpleOp(opSload.offset, Opcode.from("SLOAD").value) }} ]
+    @opSstore[ {{= getSimpleOp(opSstore.offset, Opcode.from("SSTORE").value) }} ]
+
+    {{! setJumpTable(opJump, Opcode.from("JUMP").value) }}
+    @opJump:
         ; [ ... target ]
 
         dup1()
@@ -223,60 +381,69 @@ return($lurch, #lurch)
 
         ; Get the opcode at target
         shr(248, calldataload(add(mload({{= SLOT_BC_OFF }}), $$)))
-
         ; [ ... opcode ]
 
         ; If it is a JUMPDEST, continue (skipping increment). Otherwise, die
         jumpi($next, eq({{= Opcode.from("JUMPDEST").value }}, $$))
-        jump($invalidOp)
+        jump($opInvalid)
 
-    @jumpiOp:
+    {{! setJumpTable(opJumpi, Opcode.from("JUMPI").value) }}
+    @opJumpi:
         ; [ ... notZero, target ]
         swap1()
         jumpi($popIncrement, isZero($$))
-        jump($jumpOp)
+        jump($opJump)
 
-    @pcOp:
-        ; [ ]
+    {{! setJumpTable(opPc, Opcode.from("PC").value) }}
+    @opPc:
+        ; [ ... ]
         mload({{= SLOT_PC }})
         jump($increment)
 
-    @msizeOp:
-        ; [ ]
+    {{! setJumpTable(opMsize, Opcode.from("MSIZE").value) }}
+    @opMsize:
+        ; [ ... ]
         sub(msize, {{= SLOT_MEM_BASE }})
         jump($increment)
 
-    @log0Op:
-        ; [ ... length, srcMemOffset ]
-        add(mload({{= SLOT_MEM }}), $$)
-        log0($$, $$)
-        jump($increment)        
+    @opGas[ {{= getSimpleOp(opGas.offset, Opcode.from("GAS").value) }} ]
 
-    @log1Op:
-        ; [ ... topic0, length, srcMemOffset ]
-        add(mload({{= SLOT_MEM }}), $$)
-        log1($$, $$, $$)
-        jump($increment)        
-
-    @log2Op:
-        ; [ ... topic1, topic0, length, srcMemOffset ]
-        add(mload({{= SLOT_MEM }}), $$)
-        log2($$, $$, $$, $$)
-        jump($increment)        
-
-    @log3Op:
-        ; [ ... topic2, topic1, topic0, length, srcMemOffset ]
-        add(mload({{= SLOT_MEM }}), $$)
-        log3($$, $$, $$, $$, $$)
-        jump($increment)        
-
-    @log4Op:
-        ; [ ... topic3, topic2, topic1, topic0, length, srcMemOffset ]
-        add(mload({{= SLOT_MEM }}), $$)
-        log4($$, $$, $$, $$, $$, $$)
+    {{! setJumpTable(opJumpDest, Opcode.from("JUMPDEST").value) }}
+    @opJumpDest:
         jump($increment)
 
-    @createOp:
+    ;;;;;;;;;;;;;;;
+    ;; Push Operations
+
+    @opsPush[ {{= getPushOps(opsPush.offset) }} ]
+
+    ;;;;;;;;;;;;;;;
+    ;; Duplicate Operations
+
+    @opsDuplicate[ {{= getSimpleOpRange(opsDuplicate.offset, 0x80, 0x8f) }} ]
+
+
+    ;;;;;;;;;;;;;;;
+    ;; Swap Operations
+
+    @opsSwap[ {{= getSimpleOpRange(opsSwap.offset, 0x90, 0x9f) }} ]
+
+
+    ;;;;;;;;;;;;;;;
+    ;; Log Operations
+
+    @opLog0[ {{= getLogOp(opLog0.offset, Opcode.from("LOG0").value) }} ]
+    @opLog1[ {{= getLogOp(opLog1.offset, Opcode.from("LOG1").value) }} ]
+    @opLog2[ {{= getLogOp(opLog2.offset, Opcode.from("LOG2").value) }} ]
+    @opLog3[ {{= getLogOp(opLog3.offset, Opcode.from("LOG3").value) }} ]
+    @opLog4[ {{= getLogOp(opLog4.offset, Opcode.from("LOG4").value) }} ]
+
+
+    ;;;;;;;;;;;;;;;
+    ;; System Operations
+
+    {{! setJumpTable(opCreate, Opcode.from("CREATE").value) }}
+    @opCreate:
         ; [ ... srcLength, srcOffset, value ]
 
         swap1()
@@ -287,7 +454,8 @@ return($lurch, #lurch)
 
         jump($increment)
 
-    @callOp:
+    {{! setJumpTable(opCall, Opcode.from("CALL").value) }}
+    @opCall:
         ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, value, address, gasLimit ]
 
         swap3()
@@ -302,7 +470,8 @@ return($lurch, #lurch)
 
         jump($increment)
 
-    @callcodeOp:
+    {{! setJumpTable(opCallcode, Opcode.from("CALLCODE").value) }}
+    @opCallcode:
         ; @TODO: Is this correct? No good docs on CALLCODE...
         ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, value, address, gasLimit ]
 
@@ -318,22 +487,14 @@ return($lurch, #lurch)
 
         jump($increment)
 
-    @returnOp:
+    {{! setJumpTable(opReturn, Opcode.from("RETURN").value) }}
+    @opReturn:
         ; [ ... length, srcMemOffset ]
         add(mload({{= SLOT_MEM }}), $$)
         return($$, $$)
 
-        ;; TEMP -debug remove the range
-        ;pop()
-        ;pop()
-
-        ;;; DEBUG
-        ;dup1()
-        ;mstore({{= SLOT_PC }}, $$)
-        ;return(0, {{= 32 * 8 }})
-        ;;; /DEBUG
-
-    @delegatecallOp:
+    {{! setJumpTable(opDelegatecall, Opcode.from("DELEGATECALL").value) }}
+    @opDelegatecall:
         ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, address, gasLimit ]
 
         swap2()
@@ -348,7 +509,8 @@ return($lurch, #lurch)
 
         jump($increment)
 
-    @create2Op:
+    {{! setJumpTable(opCreate2, Opcode.from("CREATE2").value) }}
+    @opCreate2:
         ; [ ... salt, srcLength, srcOffset, value ]
 
         swap1()
@@ -359,7 +521,8 @@ return($lurch, #lurch)
 
         jump($increment)
 
-    @staticcallOp:
+    {{! setJumpTable(opStaticcall, Opcode.from("STATICCALL").value) }}
+    @opStaticcall:
         ; [ ... dstLength, dstMemOffset, srcLength, srcMemOffset, address, gasLimit ]
 
         swap2()
@@ -373,11 +536,22 @@ return($lurch, #lurch)
         staticcall($$, $$, $$, $$, $$, $$)
 
         jump($increment)
-    
-    @revertOp:
+
+    {{! setJumpTable(opRevert, Opcode.from("REVERT").value) }}
+    @opRevert:
         ; [ ... length, srcMemOffset ]
         add(mload({{= SLOT_MEM }}), $$)
         revert($$, $$)
+
+    @opInvalid:
+        invalid
+
+    @opSuicide[ {{= getSimpleOp(opSuicide.offset, Opcode.from("SUICIDE").value) }} ]
+
+    ;;;;
+    ;;;; Anything after this can have 2-byte offsets
+    ;;;;
+
 
     @start:
         ; @TODO: Use various decoing depending on the selector
@@ -432,127 +606,39 @@ return($lurch, #lurch)
         jump($next)
 
 
-    ; Create an addressable jump destination block
-
-    ; This table keeps all instructions at 6 bytes each, so a given
-    ; operation can be found at ($operations + 6 * opcode). Any complex
-    ; opcodes need to jump to an additional location for extra logic.
-
     ; The stack must be intact (from the virtualized environment's point
     ; of view) when entering this jump table.
-    
+
+    @operations[ {{= concat(jumpTable.map((e) => zeroPad(hexlify(e), 2))) }} ]
+
     {{!
-
-        // Notes:
-        // - We pad with STOP (i.e. 0) because 0 is cheaper to deploy
-
-        // Simple Special cases
-        const special = {
-            SHA3: sha3Op,
-
-            MLOAD: mloadOp,
-            MSTORE: mstoreOp,
-            MSTORE8: mstore8Op,
-
-            LOG0: log0Op,
-            LOG1: log1Op,
-            LOG2: log2Op,
-            LOG3: log3Op,
-            LOG4: log4Op,
-
-            CALLDATALOAD: calldataloadOp,
-            CALLDATASIZE: calldatasizeOp,
-            CALLDATACOPY: calldatacopyOp,
-            CODESIZE: codesizeOp,
-            CODECOPY: codecopyOp,
-            EXTCODECOPY: extcodecopyOp,
-            RETURNDATACOPY: returndatacopyOp,
-
-            JUMP: jumpOp,
-            JUMPI: jumpiOp,
-
-            PC: pcOp,
-            MSIZE: msizeOp,
-
-            CREATE: createOp,
-            CALL: callOp,
-            CALLCODE: callcodeOp,
-            RETURN: returnOp,
-            DELEGATECALL: delegatecallOp,
-            CREATE2: create2Op,
-            STATICCALL: staticcallOp,
-            REVERT: revertOp,
-        };
-
-        // Some sanity checking on our jump table
-        for (const mnemonic in special) {
-            if (!special[mnemonic]) { throw new Error(`missing jumpdest: ${ mnemonic }`); }
-            if (Opcode.from(mnemonic) == null) {
-                throw new Error(`unknown opcode: ${ mnemonic }`);
+        // Some sanity checking after the bytecode is stable
+        console.log("-------------")
+        if (opInvalid) {
+            const target = { };
+            let lastOffset = 0;
+            for (let i = 0; i < 256; i++) {
+                let opcode = Opcode.from(i);
+                const offset = jumpTable[i];
+                //console.log(">", offset, opcode ? opcode.mnemonic: null);
+                if (opcode === null) {
+                    if (offset !== opInvalid) {
+                        //throw new Error("INVALID jumps to valid operation");
+                        console.log("INVALID jumps to valid operation");
+                    }
+                } else {
+                    if (target[offset]) {
+                        //throw new Error(`Duplicate ${ offset } for ${ target[offset].mnemonic }`);
+                        console.log(`Duplicate ${ offset } for ${ target[offset].mnemonic }`);
+                    }
+                    target[offset] = opcode;
+                    if (opcode.mnemonic !== "INVALID" && offset === opInvalid) {
+                        //throw new Error("opcode not defined: " + opcode.mnemonic);
+                        console.log("opcode not defined: " + opcode.mnemonic);
+                    }
+                }
             }
-        }
-        
-        const code = [ ];
-        let lastLength = 2;
-        for (let i = 0; i < 256; i++) {
-            let opcode = Opcode.from(i);
-
-            if (opcode == null) {
-                // Trap Invalid opcodes for possible reporting
-                code.push(Opcode.from("JUMPDEST"));               // 1 byte
-                //code.push(Opcode.from("PUSH2"));                  // 1 byte
-                //code.push(zeroPad(hexlify(invalidOp), 2));        // 2 bytes
-                //code.push(Opcode.from("JUMP"));                   // 1 byte                
-                code.push(Opcode.from("STOP"));                   // 1 byte
-                code.push(Opcode.from("STOP"));                   // 1 byte
-                code.push(Opcode.from("STOP"));                   // 1 byte
-                code.push(Opcode.from("STOP"));                   // 1 byte
-                code.push(Opcode.from("STOP"));                   // 1 byte
-            
-            } else if (opcode.mnemonic === "JUMPDEST") {
-                // Jump dests can be optimized
-                code.push(Opcode.from("JUMPDEST"));               // 1 byte
-                code.push(Opcode.from("PUSH1"));                  // 1 byte
-                code.push(zeroPad(hexlify(increment), 1));        // 1 byte
-                code.push(Opcode.from("JUMP"));                   // 1 byte
-                code.push(Opcode.from("STOP"));                   // 1 byte
-                code.push(Opcode.from("STOP"));                   // 1 byte
-
-            } else if (opcode.isPush()) {
-                // PUSH opcodes include their push count on the stack
-                code.push(Opcode.from("JUMPDEST"));               // 1 byte
-                code.push(Opcode.from("PUSH1"));                  // 1 byte
-                code.push(zeroPad(hexlify(opcode.isPush()), 1));  // 1 byte
-                code.push(Opcode.from("PUSH1"));                  // 1 byte
-                code.push(zeroPad(hexlify(pushOp), 1));           // 1 byte
-                code.push(Opcode.from("JUMP"));                   // 1 byte                
-
-            } else if (special[opcode.mnemonic]) {
-                // Return is hijacked for now for testing...
-                code.push(Opcode.from("JUMPDEST"));                        // 1 byte
-                code.push(Opcode.from("PUSH2"));                           // 1 byte
-                code.push(zeroPad(hexlify(special[opcode.mnemonic]), 2));  // 2 bytes
-                code.push(Opcode.from("JUMP"));                            // 1 byte
-                code.push(Opcode.from("STOP"));                            // 1 byte
-                
-            } else {
-                // Most things just work with the stack
-                code.push(Opcode.from("JUMPDEST"));               // 1 byte
-                code.push(opcode);                                // 1 byte
-                code.push(Opcode.from("PUSH1"));                  // 1 byte
-                code.push(zeroPad(hexlify(increment), 1));        // 1 bytes
-                code.push(Opcode.from("JUMP"));                   // 1 byte
-                code.push(Opcode.from("STOP"));                   // 1 byte
-            }
-
-            // Make sure the opcode sequence is exactly 6 bytes
-            if (concat(code).length !== lastLength + 12) {
-                console.log(concat(code).length, lastLength, code);
-                throw new Error("wrong bytecode length for jump table: " + i);
-            }
-            lastLength = concat(code).length;
         }
     }}
 
-    @operations[ {{= concat(code) }} ]
 }
