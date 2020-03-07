@@ -16,8 +16,8 @@
 ;  1      Bytecode Offset (into calldata)
 ;  2      Bytecode Length
 ;  3      (calldata offset << 80) | (scratch << 64) | (calldata_length)
-;  4      Calldata Length
-;  5      Virtualized Memory Offset
+;  4      Virtualized Memory Offset
+;  5      ... Virtualized Memory starts here ...
 ;
 ;
 ;
@@ -30,6 +30,9 @@
     const SLOT_CD        = 0x60;
     const CD_OFF_SHIFT   = 80;
     const CD_LEN_MASK    = 0xffff;
+
+    // The offset (in bytes) into SLOT_CD where the left
+    // edge of the SCRATCH begins.
     const SLOT_SCRATCH   = SLOT_CD + 0x20 - 2 - 2;
 
     const SLOT_MEM       = 0x80;
@@ -238,19 +241,19 @@ return($lurch, #lurch)
 
 
     ;;;;;;;;;;;;;;;
-    ;; Math Operations
+    ;; Math Operations (0x01 - 0x0b)
 
     @opsMaths[ {{= getSimpleOpRange(opsMaths.offset, 0x01, 0x0b) }} ]
 
 
     ;;;;;;;;;;;;;;;
-    ;; Compare and Bitwise Operations
+    ;; Compare and Bitwise Operations (0x10 - 0x1d)
 
     @opsCompareBitwise[ {{= getSimpleOpRange(opsCompareBitwise.offset, 0x10, 0x1d) }} ]
 
 
     ;;;;;;;;;;;;;;;
-    ;; Identity Operations
+    ;; Identity Operations (0x20)
 
     {{! setJumpTable(opSha3, Opcode.from("SHA3").value) }}
     @opSha3:
@@ -261,7 +264,7 @@ return($lurch, #lurch)
 
 
     ;;;;;;;;;;;;;;;
-    ;; Environment Information
+    ;; Environment Information (0x30 - 0x3f)
 
     @opAddress[ {{= getSimpleOp(opAddress.offset, Opcode.from("ADDRESS").value) }} ]
     @opBalance[ {{= getSimpleOp(opBalance.offset, Opcode.from("BALANCE").value) }} ]
@@ -334,13 +337,13 @@ return($lurch, #lurch)
 
 
     ;;;;;;;;;;;;;;;
-    ;; Block Information
+    ;; Block Information (0x40 - 0x45)
 
     @opsBlock[ {{= getSimpleOpRange(opsBlock.offset, 0x40, 0x45) }} ]
 
 
     ;;;;;;;;;;;;;;;
-    ;; Stack, Memory, Storage and Flow Operations
+    ;; Stack, Memory, Storage and Flow Operations (0x50 - 0x5b)
 
     @opPop[ {{= getSimpleOp(opPop.offset, Opcode.from("POP").value) }} ]
 
@@ -413,24 +416,24 @@ return($lurch, #lurch)
         jump($increment)
 
     ;;;;;;;;;;;;;;;
-    ;; Push Operations
+    ;; Push Operations (0x60 - 0x7f)
 
     @opsPush[ {{= getPushOps(opsPush.offset) }} ]
 
     ;;;;;;;;;;;;;;;
-    ;; Duplicate Operations
+    ;; Duplicate Operations (0x80 - 0x8f)
 
     @opsDuplicate[ {{= getSimpleOpRange(opsDuplicate.offset, 0x80, 0x8f) }} ]
 
 
     ;;;;;;;;;;;;;;;
-    ;; Swap Operations
+    ;; Swap Operations (0x90 - 0x9f)
 
     @opsSwap[ {{= getSimpleOpRange(opsSwap.offset, 0x90, 0x9f) }} ]
 
 
     ;;;;;;;;;;;;;;;
-    ;; Log Operations
+    ;; Log Operations (0xa0 - 0xa4)
 
     @opLog0[ {{= getLogOp(opLog0.offset, Opcode.from("LOG0").value) }} ]
     @opLog1[ {{= getLogOp(opLog1.offset, Opcode.from("LOG1").value) }} ]
@@ -440,7 +443,7 @@ return($lurch, #lurch)
 
 
     ;;;;;;;;;;;;;;;
-    ;; System Operations
+    ;; System Operations (0xf0 - 0xff, 0xfa, 0xfd - 0xff)
 
     {{! setJumpTable(opCreate, Opcode.from("CREATE").value) }}
     @opCreate:
@@ -613,6 +616,8 @@ return($lurch, #lurch)
 
     {{!
         // Some sanity checking after the bytecode is stable
+        // - Make sure every opcode is represented (jumps to a unique offset)
+        // - Make sure all non-opcodes jump to invalid
         console.log("-------------")
         if (opInvalid) {
             const target = { };
@@ -640,5 +645,4 @@ return($lurch, #lurch)
             }
         }
     }}
-
 }
