@@ -43,10 +43,10 @@ codecopy(0, $_, #_)
 mstore({{= myAddress.offset + 1 }}, address)
 
 ; Return the Lurch Contract
-return($lurch, #lurch)
+return($Lurch, #Lurch)
 
 
-@lurch {
+@Lurch {
     ; Make sure we are in a DELEGATECALL
 
     ; Put my real address here at deployment(to detect if in a call delegate)

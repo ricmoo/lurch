@@ -53,10 +53,10 @@ async function deploy(filename, target, options) {
 
 (async function() {
 
-    const lurchAddress = await deploy("lurch-bare.asm", "lurch");
+    const lurchAddress = await deploy("lurch-rooted.asm", "Lurch");
     console.log("Lurch Address:", lurchAddress);
 
-    const springboardAddress = await deploy("Springboard.asm", "Springboard", {
+    const springboardAddress = await deploy("springboard-rooted.asm", "Springboard", {
         defines: {
             LurchAddress: lurchAddress
         }
