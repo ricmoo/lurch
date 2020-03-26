@@ -5,12 +5,12 @@
 ; to a given creator.
 ;
 ; The calldata layout for this Lurch is:
-;   [ callvalue: 32 bytes ] [ bytecode length: 32 bytes ] [ bytecode: XX bytes ]
+;   [ caller: 32 bytes ] [ bytecode length: 32 bytes ] [ bytecode: XX bytes ]
 
 ; Memory Layout
 ; Slot   Purpose
-;  0      PC (adjusted for calldata offset)
-;  1      End offset (adjusted for calldata offset)
+;  0      PC             (adjusted for calldata offset)
+;  1      End offset     (adjusted for calldata offset)
 ;  2      Scratch
 ;  3      ... Virtualized Memory starts here ...
 ;
@@ -26,11 +26,10 @@
 
     const SLOT_MEM_BASE  = 0x60;
 
-    // [ callvalue: 32 bytes ] [ caller: 32 bytes ] [ bytecode.length: 32 bytes ] [ bytecode: XX bytes ]
-    const CD_VALUE_OFFSET      = 0
-    const CD_CALLER_OFFSET     = 32
-    const CD_BC_LENGTH_OFFSET  = 64;
-    const CD_BC_OFFSET         = 96;
+    // [ caller: 32 bytes ] [ bytecode.length: 32 bytes ] [ bytecode: XX bytes ]
+    const CD_CALLER_OFFSET     = 0
+    const CD_BC_LENGTH_OFFSET  = 32;
+    const CD_BC_OFFSET         = 64;
 
 }}
 
@@ -243,7 +242,7 @@ return($Lurch, #Lurch)
 
     {{! setJumpTable(opSha3, Opcode.from("SHA3").value) }}
     @opSha3:
-        ; [ ... memDestOffset ]
+        ; [ ... length, memDestOffset ]
         add({{= SLOT_MEM_BASE }}, $$)
         sha3($$, $$)
         jump($increment)
@@ -262,30 +261,27 @@ return($Lurch, #Lurch)
         calldataload({{= CD_CALLER_OFFSET }})
         jump($increment)
 
-    {{! setJumpTable(opCallvalue, Opcode.from("CALLVALUE").value) }}
-    @opCallvalue:
-        ; [ ... ]
-        calldataload({{= CD_VALUE_OFFSET }})
-        jump($increment)
+    @opCallvalue[ {{= getSimpleOp(opCallvalue.offset, Opcode.from("CALLVALUE").value) }} ]
 
     {{! setJumpTable(opCalldataload, Opcode.from("CALLDATALOAD").value) }}
     @opCalldataload:
         ; [ ... offset ]
-        ;add(shr({{= CD_OFF_SHIFT }}, mload({{= SLOT_CD }})), $$)
-        ;calldataload($$)
         0x00
         jump($increment)
 
     {{! setJumpTable(opCalldatasize, Opcode.from("CALLDATASIZE").value) }}
     @opCalldatasize:
         ; [ ... ]
-        ;mload(and({{= CD_LEN_MASK }}, {{= SLOT_CD }}))
         0x00
         jump($increment)
 
     {{! setJumpTable(opCalldatacopy, Opcode.from("CALLDATACOPY").value) }}
     @opCalldatacopy:
         ; [ ... length, offset, dstMemOffset ]
+
+        ; This version of Lurch does not support calldata, so it
+        ; fast-forwards to thhe end of the actual calldata to
+        ; zero-fill the output
 
         calldatasize()       ; [ ... length, offset, dstMemOffset, calldatasize ]
         swap2()              ; [ ... length, calldatasize, dstMemOffset, offset ]
@@ -294,16 +290,12 @@ return($Lurch, #Lurch)
         ; [ ... length, calldatasize, dstMemOffset ]
 
         add({{= SLOT_MEM_BASE }}, $$)
-        ;swap1()
-        ;add(mload(shr({{= CD_OFF_SHIFT}}, {{= SLOT_CD }})), $$)
-        ;swap1()
         calldatacopy($$, $$, $$)
         jump($increment)
 
     {{! setJumpTable(opCodesize, Opcode.from("CODESIZE").value) }}
     @opCodesize:
         ; [ ... ]
-        ;mload(sub({{= SLOT_BC_END }}, {{= SLOT_BC_OFF}}))
         calldataload({{= CD_BC_LENGTH_OFFSET }})
         jump($increment)
 

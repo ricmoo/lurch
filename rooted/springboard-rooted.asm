@@ -166,9 +166,8 @@ return (0, #Springboard);
         @skipFetchFailed:
 
         ; Set up the Lurch (Bare) layout
-        ; [ callvalue: 32 bytes ] [ caller: 32 bytes ] [ bytecode.length: 32 bytes ] [ bytecode: XX bytes ]
-        mstore(0, callvalue)
-        returndatacopy(32, 0, returndatasize)
+        ; [ caller: 32 bytes ] [ bytecode.length: 32 bytes ] [ bytecode: XX bytes ]
+        returndatacopy(0, 0, returndatasize)
 
         ; DELEGATECALL Lurch, with theinit code, which will execute it,
         ; returning the result of the initcode

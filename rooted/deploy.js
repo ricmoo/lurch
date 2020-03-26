@@ -53,6 +53,9 @@ async function deploy(filename, target, options) {
 
 (async function() {
 
+    const dataAddress = await deploy("storage.asm", "Storage");
+    console.log("Data Address:", dataAddress);
+
     const lurchAddress = await deploy("lurch-rooted.asm", "Lurch");
     console.log("Lurch Address:", lurchAddress);
 

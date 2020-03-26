@@ -8,9 +8,17 @@
 ; API
 ;
 ; interface Storage {
-;     function get(bytes32 key) view returns (bytes32);
-;     function set(bytes32 key, bytes32 value);
+;     function getXXX(bytes32 key) view returns (bytes32);
+;     function setXXX(bytes32 key, bytes32 value);
 ; }
+;
+; The function selector (e.g. getXXX and setXXX) is ignored. The
+; only important thing is that all types are fixed-width up to
+; 32 bytes. For example: uint256, address, int8, bool.
+;
+; Also note that callers should ensure keys are unique. If two
+; forms are used which can collide (e.g. uint256 and bytes32),
+; the caller is responsible to make sure keys are unique.
 
 ;;;;;;;;
 
@@ -26,10 +34,10 @@ return (0, #Storage);
     ; non-payable (throw if we receive value)
     jumpi($error, callvalue)
 
-    ; If calldata is set(bytes32 key, bytes32 value), use set
+    ; If calldata is setXXX(bytes32 key, bytes32 value), use set
     jumpi($set, eq(calldatasize, 68))
 
-    ; We calldata is get(bytes32 key), use get
+    ; We calldata is getXXX(bytes32 key), use get
     jumpi($get, eq(calldatasize, 36))
 
     @error:
