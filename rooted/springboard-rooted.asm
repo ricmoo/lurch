@@ -165,16 +165,16 @@ return (0, #Springboard);
         revert(0, 0)
         @skipFetchFailed:
 
-        ; Set up the Lurch (Bare) layout
+        ; Set up the Lurch (Rooted) layout
         ; [ caller: 32 bytes ] [ bytecode.length: 32 bytes ] [ bytecode: XX bytes ]
         returndatacopy(0, 0, returndatasize)
 
-        ; DELEGATECALL Lurch, with theinit code, which will execute it,
+        ; DELEGATECALL Lurch, with the initcode, which will execute it,
         ; returning the result of the initcode
-        delegatecall(gas, {{= defines.LurchAddress }}, 0, add(32, returndatasize), 0, 0)
+        delegatecall(gas, {{= defines.LurchAddress }}, 0, returndatasize, 0, 0)
 
         ; Revert if the call into Lurch failed
-        jumpi($skipLurchFailed, dup1)
+        jumpi($skipLurchFailed, $$)
         revert(0, 0)
         @skipLurchFailed:
 
