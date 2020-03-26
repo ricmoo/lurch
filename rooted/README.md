@@ -20,7 +20,7 @@ deployment calls.
 
 1. Create a new EOA for your Contract
 2. Fund that account 
-3. Deploy your contract as usual, **except**: instead of an empty `to` address, use `v0-beta-0.rooted.eth1`.
+3. Deploy your contract as usual, **except**: instead of an empty `to` address, use `v0-beta-0.rooted.eth`.
 
 That's it! When you wish to upgrade your contract, simply use
 whatever method exists on your contract to self-destruct it and
