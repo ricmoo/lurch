@@ -18,10 +18,6 @@
 ; Deploy the Springboard
 ;
 
-{{!
-    const LurchAddress = "0x123456";
-}}
-
 codecopy(0, $Springboard, #Springboard);
 return (0, #Springboard);
 
