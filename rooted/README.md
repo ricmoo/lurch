@@ -27,6 +27,80 @@ whatever method exists on your contract to self-destruct it and
 then follow the above steps again, with the new contract bytecode.
 
 
+Command-Line Interface
+----------------------
+
+The command-line interface has the same options as the other
+[ethers CLI utilities](https://docs-beta.ethers.io/cli/ethers/#sandbox-utility--help).
+To install, use `npm install @ricmoo/rooted`, and can then be used with the
+following usage:
+
+```
+Usage:
+   rooted FILENAME [ OPTIONS ]
+
+OPTIONS
+  --contract                  specify the contract to deploy
+  --args                      specify JSON encoded constructor args
+  --no-optimize               do not run the optimizer
+```
+
+**Example:**
+
+```
+/home/ricmoo> npm install -g @ricmoo/rooted
+
+/home/ricmoo> cat Test1.sol
+contract Test1 {
+    address public owner = msg.sender;
+    string public value;
+
+    constructor(string _value) public {
+        value = _value;
+    }
+
+    function die() public {
+        require(msg.sender == owner);
+        selfdestruct(owner);
+    }
+}
+
+/home/ricmoo> cat Test2.sol
+contract Test2 {
+    address public owner = msg.sender;
+
+    function value() public view returns (string) {
+        return "The cat came back...";
+    }
+
+    function die() public {
+        require(msg.sender == owner);
+        selfdestruct(owner);
+    }
+}
+
+# Deploy
+/home/ricmoo> rooted --account wallet.json Test1.sol --args '[ "Hello World" ]'
+/home/ricmoo> export ADDR=""
+/home/ricmoo> ethers --account wallet.json eval 'provider.getCode(process.env.ADDR)'
+"0x1234"
+/home/ricmoo> ethers --account wallet.json eval '(new Contract(process.env.ADDR, [ "function value() view" ], accounts[0])).view()'
+"Hello World"
+
+# Destroy
+/home/ricmoo> ethers --account wallet.json eval '(new Contract(process.env.ADDR, [ "function kill()" ], accounts[0])).kill()'
+/home/ricmoo> ethers --account wallet.json eval 'provider.getCode(process.env.ADDR)'
+"0x"
+
+# Redeploy (same address, new code)
+/home/ricmoo> rooted --account wallet.json Test2.sol --args '[ "The cat came back..." ]'
+/home/ricmoo> ethers --account wallet.json eval 'provider.getCode(process.env.ADDR)'
+"0x1234"
+/home/ricmoo> ethers --account wallet.json eval '(new Contract(process.env.ADDR, [ "function value() view" ], accounts[0])).view()'
+"The cat came back..."
+```
+
+
 Persistent Storage
 ------------------
 
@@ -59,11 +133,11 @@ And in your contract, you can use:
 
 ```
 function persistentValue() view public returns (uint256) {
-    return StorageUint256(0xAc180e659dB90529b3A1890e9f113c6859Bf4B19).get(0);
+    return StorageUint256(0x760158D4613e8851D0C5Ae906a81698da89f903a).get(0);
 }
 
 function setPersistentValue(uint256 _value) public {
-    StorageUint256(0xAc180e659dB90529b3A1890e9f113c6859Bf4B19).set(0, _value);
+    StorageUint256(0x760158D4613e8851D0C5Ae906a81698da89f903a).set(0, _value);
 }                            
 ```
 
@@ -86,14 +160,15 @@ transaction, this allows contracts to live as long as is desired.
 
 Lurch allows execution of EVM bytecode within an Ethereum contract, which
 allows for hooks to alter the environment during runtime. In this case, opcodes
-like codecopy and caller are hijacked so the executing initcode thinks it
+like `codecopy` and `caller` are hijacked so the executing initcode thinks it
 is being deployed normally.
+
 
 Caveats
 -------
 
 - This shold be thought of as fairly experimental at this point; please use it responsibly
-- On average Lurch costs quite a bit more to run a contract through, in most cases about twice as much
+- On average Lurch costs quite a bit more to run a contract through, around 300k gas more
 
 
 License

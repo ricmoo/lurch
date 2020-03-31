@@ -3,12 +3,13 @@
 const fs = require("fs");
 
 const { ethers } = require("ethers");
-const { assemble, disassemble, formatBytecode, parse } = require("/Users/ricmoo/Development/ethers/ethers.js-v5/packages/asm");
-//const { assemble, disassemble, formatBytecode, parse } = require("@ethersproject/asm");
+const { assemble, disassemble, formatBytecode, parse } = require("@ethersproject/asm");
 
-const provider = new ethers.providers.JsonRpcProvider();
-provider.pollingInterval = 100;
-const signer = provider.getSigner();
+//const provider = new ethers.providers.JsonRpcProvider();
+//provider.pollingInterval = 100;
+//const signer = provider.getSigner();
+
+const signer = accounts[0];
 
 async function getBytecode(filename, options) {
     const source = fs.readFileSync(filename).toString();
@@ -52,15 +53,17 @@ async function deploy(filename, target, options) {
 }
 
 (async function() {
+    const network = await provider.getNetwork();
 
-    const dataAddress = await deploy("storage.asm", "Storage");
-    console.log("Data Address:", dataAddress);
+    //const dataAddress = await deploy("storage.asm", "Storage");
+    //console.log("Data Address:", dataAddress);
 
     const lurchAddress = await deploy("lurch-rooted.asm", "Lurch");
     console.log("Lurch Address:", lurchAddress);
 
     const springboardAddress = await deploy("springboard-rooted.asm", "Springboard", {
         defines: {
+            Network: network.name,
             LurchAddress: lurchAddress
         }
     });

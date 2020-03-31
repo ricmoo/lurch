@@ -1,0 +1,33 @@
+{
+  "name": "@ricmoo/rooted",
+  "version": "0.0.1",
+  "description": "The CLI and code for Rooted Ethereum deployments.",
+  "bin": {
+    "rooted": "./bin/rooted.js"
+  },
+  "dependencies": {
+    "@ethersproject/cli": "5.0.0-beta.152",
+    "ethers": "5.0.0-beta.178",
+    "solc": "^0.6.4"
+  },
+  "main": "index.js",
+  "scripts": {
+    "deploy": "node deploy.js",
+    "test": "node test-rooted.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ricmoo/lurch.git"
+  },
+  "keywords": [
+    "Ethereum",
+    "Rooted",
+    "deployment"
+  ],
+  "author": "Richard Moore <me@ricmoo.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ricmoo/lurch/issues"
+  },
+  "homepage": "https://github.com/ricmoo/lurch/tree/master/rooted#readme"
+}
