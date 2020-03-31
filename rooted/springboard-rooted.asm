@@ -18,6 +18,21 @@
 ; Deploy the Springboard
 ;
 
+{{!
+    const provider = ethers.getDefaultProvider(defines.Network);
+    const ens = new ethers.Contract(provider.network.ensAddress, [
+        "function owner(bytes32) view returns (address)"
+    ], provider);
+}}
+
+; Claim our record in the ENS reverse registrar by giving
+; it's record to the deployer who will be able to set the
+; reverse record
+mstore(0, {{= sighash("claim(address owner)") }})
+mstore(32, caller)
+call(gas, {{= ens.owner(ethers.utils.namehash("addr.reverse")) }}, 0, 28, 36, 0, 0)
+
+; Return the Springboard source
 codecopy(0, $Springboard, #Springboard);
 return (0, #Springboard);
 
