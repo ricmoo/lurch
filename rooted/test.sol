@@ -26,12 +26,12 @@ contract SimpleStorage {
 
     // These proxy to external storage and will survive death
     function persistentValue() view public returns (uint256) {
-        return Storage(0xAc180e659dB90529b3A1890e9f113c6859Bf4B19).get(0);
+        return Storage(0x760158D4613e8851D0C5Ae906a81698da89f903a).get(0);
     }
 
     function setPersistentValue(uint256 _value) public {
         emit PersistentValueChanged(msg.sender, persistentValue(), _value);
-        Storage(0xAc180e659dB90529b3A1890e9f113c6859Bf4B19).set(0, _value);
+        Storage(0x760158D4613e8851D0C5Ae906a81698da89f903a).set(0, _value);
     }
 
     // We use this to destory this contract and prepare it for upgrading
