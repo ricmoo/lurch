@@ -26,6 +26,9 @@
   ],
   "author": "Richard Moore <me@ricmoo.com>",
   "license": "MIT",
+  "publishConfig": {
+      "access": "public"
+  },
   "bugs": {
     "url": "https://github.com/ricmoo/lurch/issues"
   },
