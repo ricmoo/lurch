@@ -1,0 +1,5 @@
+*.asm
+contracts/
+
+deploy.js
+test-rooted.js
