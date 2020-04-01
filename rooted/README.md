@@ -47,6 +47,10 @@ OPTIONS
 
 **Example:**
 
+These operations were run on ropsten (the `--network ropsten` is
+omitted for brevity), so each transaction hash can be looked up
+on [Etherscan](https://ropsten.etherscan.io).
+
 ```
 /home/ricmoo> npm install -g @ricmoo/rooted
 
@@ -67,9 +71,9 @@ contract Test1 {
 
 /home/ricmoo> cat Test2.sol
 contract Test2 {
-    address public owner = msg.sender;
+    address payable public owner = msg.sender;
 
-    function value() public view returns (string) {
+    function value() public view returns (string memory) {
         return "The cat came back...";
     }
 
@@ -81,23 +85,41 @@ contract Test2 {
 
 # Deploy
 /home/ricmoo> rooted --account wallet.json Test1.sol --args '[ "Hello World" ]'
-/home/ricmoo> export ADDR=""
+Deploy: contracts/tests/test1.sol
+  Contract Address:  0x266bBB07e802890024eBd03512FbED1E3c961d83
+Response:
+  Hash:  0x35317670d0edf57c4eb8c75c0fa080c81f8ab30cde27e7d2db30b50b96be7293
+  
+/home/ricmoo> export ADDR="0x266bBB07e802890024eBd03512FbED1E3c961d83"
+
 /home/ricmoo> ethers --account wallet.json eval 'provider.getCode(process.env.ADDR)'
-"0x1234"
-/home/ricmoo> ethers --account wallet.json eval '(new Contract(process.env.ADDR, [ "function value() view" ], accounts[0])).view()'
-"Hello World"
+"0x608060405234801561001057600080fd5b50600436106100415760003560e01c806335f46994146100465780633fa4f245146100505780638da5cb5b146100cd575b600080fd5b61004e6100f1565b005b610058610116565b6040805160208082528351818301528351919283929083019185019080838360005b8381101561009257818101518382015260200161007a565b50505050905090810190601f1680156100bf5780820380516001836020036101000a031916815260200191505b509250505060405180910390f35b6100d56101a3565b604080516001600160a01b039092168252519081900360200190f35b6000546001600160a01b0316331461010857600080fd5b6000546001600160a01b0316ff5b60018054604080516020600284861615610100026000190190941693909304601f8101849004840282018401909252818152929183018282801561019b5780601f106101705761010080835404028352916020019161019b565b820191906000526020600020905b81548152906001019060200180831161017e57829003601f168201915b505050505081565b6000546001600160a01b03168156fea2646970667358221220eb669057926d1e6d788f7eb4df1322e2d04c3e49790744f9c31fdca1a8e3074f64736f6c63430006040033"
+
+/home/ricmoo> ethers eval '(new Contract(process.env.ADDR, [ "function value() view returns (string)" ], provider)).value()'
+Hello World
+
 
 # Destroy
-/home/ricmoo> ethers --account wallet.json eval '(new Contract(process.env.ADDR, [ "function kill()" ], accounts[0])).kill()'
+/home/ricmoo> ethers --account wallet.json eval '(new Contract(process.env.ADDR, [ "function die()" ], accounts[0])).die()'
+Response:
+  Hash:  0xd74a31f8fb0ec36bcbae174a665e1f183d269bf122605a44355dfc6d0b7235ca
+
 /home/ricmoo> ethers --account wallet.json eval 'provider.getCode(process.env.ADDR)'
 "0x"
 
+
 # Redeploy (same address, new code)
-/home/ricmoo> rooted --account wallet.json Test2.sol --args '[ "The cat came back..." ]'
+/home/ricmoo> rooted --account wallet.json Test2.sol
+Deploy: contracts/tests/test2.sol
+  Contract Address:  0x266bBB07e802890024eBd03512FbED1E3c961d83
+Response:
+  Hash:  0x89cb3165cb8a27d08094b198dbe8279147c226de293b69b86ccca91fedf621f1
+
 /home/ricmoo> ethers --account wallet.json eval 'provider.getCode(process.env.ADDR)'
-"0x1234"
-/home/ricmoo> ethers --account wallet.json eval '(new Contract(process.env.ADDR, [ "function value() view" ], accounts[0])).view()'
-"The cat came back..."
+"0x608060405234801561001057600080fd5b50600436106100415760003560e01c806335f46994146100465780633fa4f245146100505780638da5cb5b146100cd575b600080fd5b61004e6100f1565b005b610058610116565b6040805160208082528351818301528351919283929083019185019080838360005b8381101561009257818101518382015260200161007a565b50505050905090810190601f1680156100bf5780820380516001836020036101000a031916815260200191505b509250505060405180910390f35b6100d5610144565b604080516001600160a01b039092168252519081900360200190f35b6000546001600160a01b0316331461010857600080fd5b6000546001600160a01b0316ff5b6040805180820190915260148152732a34329031b0ba1031b0b6b2903130b1b597171760611b602082015290565b6000546001600160a01b03168156fea26469706673582212205320b56a7ffb50e87057e9097f43c461aeeda9bd441fa781680ac5a46535cea164736f6c63430006040033"
+
+/home/ricmoo> ethers --account wallet.json eval '(new Contract(process.env.ADDR, [ "function value() view returns (string)" ], accounts[0])).value()'
+The cat came back...
 ```
 
 
