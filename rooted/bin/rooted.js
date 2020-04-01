@@ -88,7 +88,7 @@ RootedPlugin.prototype.prepareOptions = async function(argParser) {
 
     this.optimize = !argParser.consumeFlag("no-optimize");
     this.contract = argParser.consumeOption("contract");
-    this.version = argParser.consumeOption("version");
+    this.version = argParser.consumeOption("version") || "v0";
 
     // Check this utility supports the version
     if (this.version !== "v0") {
